@@ -30,11 +30,7 @@ class MovieScrollItem(scrapy.Item):
 
     score = scrapy.Field()
     name = scrapy.Field()
-    tags = scrapy.Field()
-    price = scrapy.Field()
-    authors = scrapy.Field()
+    categories = scrapy.Field()
     published_at = scrapy.Field()
-    isbm = scrapy.Field()
     cover = scrapy.Field()
-    comments = scrapy.Field()
     image_paths = scrapy.Field()

@@ -29,8 +29,6 @@ class MoviescrollSpider(scrapy.Spider):
                 'playwright_page_init_callback': init_page,
                 'playwright_page_methods': [
                     PageMethod("wait_for_selector", "div.el-card"),
-                    # PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                    # PageMethod("wait_for_selector", "div.el-card:nth-child(100)"),  # 10 per page
                 ]
             },
             errback = self.errback_close_page,
@@ -38,6 +36,8 @@ class MoviescrollSpider(scrapy.Spider):
 
     async def parse_index(self, response):
         page = response.meta['playwright_page']
+
+        # scroll the page to the end
         pre_name = ''
         cur_name = await page.locator('.el-card .m-b-sm').nth(-1).text_content()
         while (cur_name != pre_name):
@@ -46,11 +46,22 @@ class MoviescrollSpider(scrapy.Spider):
             await page.wait_for_timeout(3000)
             pre_name = cur_name
             cur_name = await page.locator('.el-card .m-b-sm').nth(-1).text_content()
-        # card = page.locator("div.el-card:nth-child(100)")
-        # await card.wait_for()
-        screenshot = await page.screenshot(path="./image/" + "web.png", full_page=True)
-        name_list = response.css('.el-card .m-b-sm::text').getall()
-        print('name list is ', name_list)
+        # screenshot = await page.screenshot(path="./image/" + "web.png", full_page=True)
+
+        # parse index html
+        html = await page.content()
+        doc = pq(html)
+        for item in doc('.el-card.item').items():
+            movieitem = MovieScrollItem()
+            movieitem['name'] = item('.m-b-sm').text()
+            score = item('.score').text()
+            score = float(score) if score else None
+            movieitem['score'] = score
+            movieitem['categories'] = [tag.text() for tag in item('.categories button span').items()]
+            movieitem['cover'] = item('.cover').attr('src')
+            yield movieitem
+
+            # self.logger.info('movie name is : %s', movieitem)
 
     async def errback_close_page(self, failure):
         page = failure.request.meta['playwright_page']

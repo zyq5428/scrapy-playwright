@@ -121,7 +121,7 @@ ROBOTSTXT_OBEY = False
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
    "template.pipelines.TemplatePipeline": 300,
-#    "template.pipelines.ImagePipeline": 301,
+   "template.pipelines.ImagePipeline": 301,
    "template.pipelines.MongoPipeline": 302,
 }
 
