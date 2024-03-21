@@ -34,3 +34,12 @@ class MovieScrollItem(scrapy.Item):
     published_at = scrapy.Field()
     cover = scrapy.Field()
     image_paths = scrapy.Field()
+
+class NbaItem(scrapy.Item):
+    collection = 'NBA'
+
+    name = scrapy.Field()
+    height = scrapy.Field()
+    weight = scrapy.Field()
+    cover = scrapy.Field()
+    image_paths = scrapy.Field()
