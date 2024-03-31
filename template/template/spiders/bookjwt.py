@@ -144,7 +144,7 @@ class BookjwtSpider(scrapy.Spider):
             if response.css('.info .authors::text').get() else None
         item['published_at'] = response.css('.info .published-at::text').re('(\d{4}-\d{2}-\d{2})')[0] \
             if response.css('.info .published-at::text').get() else None
-        item['isbm'] = response.css('.info .isbn::text').re('ISBM：(.*)')[0] \
+        item['isbm'] = response.css('.info .isbn::text').re('ISBN：(.*)')[0] \
             if response.css('.info .isbn::text').get() else None
         item['cover'] = response.css('img.cover::attr("src")').get()
         item['comments'] = response.css('.comments p::text').re('[^\x00-\xff].*')

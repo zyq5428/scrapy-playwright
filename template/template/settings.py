@@ -12,6 +12,8 @@ BOT_NAME = "template"
 SPIDER_MODULES = ["template.spiders"]
 NEWSPIDER_MODULE = "template.spiders"
 
+HTTPERROR_ALLOWED_CODES = [403]
+
 # Log setting
 LOG_LEVEL = "INFO"
 
@@ -63,7 +65,7 @@ PLAYWRIGHT_ABORT_REQUEST = should_abort_request
 # REDIS_URL = 'redis://localhost:6379'
 
 # user spider setting
-MAX_PAGE = 10
+MAX_PAGE = 1
 
 MONGO_URI = 'localhost'
 MONGO_DB = 'template'

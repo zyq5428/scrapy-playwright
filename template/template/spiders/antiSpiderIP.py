@@ -34,7 +34,7 @@ class AntispiderSpider(scrapy.Spider):
                         "username": "user",
                         "password": "pass",
                     },
-                }
+                },
                 'playwright_include_page': True,
                 'playwright_page_init_callback': init_page,
                 'playwright_page_methods': [

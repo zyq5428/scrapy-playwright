@@ -43,3 +43,17 @@ class NbaItem(scrapy.Item):
     weight = scrapy.Field()
     cover = scrapy.Field()
     image_paths = scrapy.Field()
+
+class AntiUserItem(scrapy.Item):
+    collection = 'anti'
+
+    score = scrapy.Field()
+    name = scrapy.Field()
+    tags = scrapy.Field()
+    price = scrapy.Field()
+    authors = scrapy.Field()
+    published_at = scrapy.Field()
+    isbm = scrapy.Field()
+    cover = scrapy.Field()
+    comments = scrapy.Field()
+    image_paths = scrapy.Field()
