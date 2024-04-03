@@ -1,5 +1,6 @@
 import scrapy
 import sys
+import os
 import re
 import json
 from urllib.parse import urljoin
@@ -83,23 +84,26 @@ class AntiuserSpider(scrapy.Spider):
             await page.goto(BASE_URL)
             await page.wait_for_load_state("networkidle")
             # save storage_state to file
-            storage = await page.context.storage_state(path=COOKIE_FILE)
-            self.logger.debug('Cookies is saved to %s: \n %s', COOKIE_FILE, storage)
+            storage = await page.context.storage_state(path=self.username)
+            self.logger.debug('Cookies is saved to %s: \n %s', self.username, storage)
             # await page.screenshot(path="./image/login_succeed.png", full_page=True)
         except Exception as e:
-            self.logger.error('login failed', exc_info=True)      
+            self.logger.error('login failed', exc_info=True)
 
-    async def relogin(self, response):
+    async def relogin(self, response, url, username):
         page = response.meta['playwright_page']
-        repeat_url = response.meta['url']
-        self.logger.info('repeat url is: %s', repeat_url)
-        await self.login(page)
+        # repeat_url = response.meta['url']
+        # self.logger.info('repeat url is: %s', repeat_url)
+        if username == self.username:
+            await self.login(page)
+        else:
+            await page.wait_for_timeout(10000)
         storage_state = {}
         with open('cookies.json') as f:
             storage_state = json.load(f)
-        self.logger.info('Recrawl the site: %s', repeat_url)
+        self.logger.info('Recrawl the site: %s', url)
         yield scrapy.Request(
-            url = repeat_url,
+            url = url,
             callback = self.parse_index,
             meta = {
                 'playwright': True,
@@ -176,9 +180,7 @@ class AntiuserSpider(scrapy.Spider):
                     # 'playwright_page_methods': [
                     #     PageMethod("wait_for_selector", ".el-card__body"),
                     # ],
-                    # 'dont_redirect': True,
                 },
-                
                 # errback = self.errback_close_page,
                 errback = self.errback_error_code,
             )
@@ -188,14 +190,15 @@ class AntiuserSpider(scrapy.Spider):
         page = response.meta['playwright_page']
         await page.locator('.m-t.el-row div.el-card__body h2').first.wait_for()
         h2 = await page.locator('.m-t.el-row div.el-card__body h2').first.text_content()
-        self.logger.info('url is: %s, h2 is: %s', response.url, h2)
+        username = await page.locator('.login .logout').text_content()
+        username = re.search(r'(\b.*\b)', username).group(1)
+        self.logger.info('url: %s, h2: %s, username: %s', response.url, h2, username)
         if h2 == ERROR_STR:
             self.logger.error('Users click frequently, Current user is: %s', self.username)
             yield scrapy.Request(
                 url = response.url,
                 callback = self.relogin,
                 meta = {
-                    'url': response.url,
                     'playwright': True,
                     'playwright_context': 'relogin',
                     'playwright_include_page': True,
@@ -203,6 +206,10 @@ class AntiuserSpider(scrapy.Spider):
                     'playwright_page_methods': [
                         PageMethod('wait_for_selector', 'input[type="text"]'),
                     ],
+                },
+                cb_kwargs = {
+                    'url': response.url,
+                    'username': username,
                 },
                 dont_filter = True,
                 errback = self.errback_close_page,
@@ -214,18 +221,18 @@ class AntiuserSpider(scrapy.Spider):
             score = doc('.score').text()
             item['score'] = float(score) if score else None
             item['name'] = doc('h2.name').text()
-            # item['tags'] = response.css('.tags span::text').re('[^\x00-\xff]{1,10}')
-            # price = response.css('.info .price span::text').get()
-            # if price and re.search(r'\d+(\.\d*)?', price):
-            #     item['price'] = float(re.search(r'\d+(\.\d*)?', price).group())
-            # item['authors'] = response.css('.info .authors::text').re('作者：(.*)')[0] \
-            #     if response.css('.info .authors::text').get() else None
-            # item['published_at'] = response.css('.info .published-at::text').re('(\d{4}-\d{2}-\d{2})')[0] \
-            #     if response.css('.info .published-at::text').get() else None
-            # item['isbm'] = response.css('.info .isbn::text').re('ISBN：(.*)')[0] \
-            #     if response.css('.info .isbn::text').get() else None
+            item['tags'] = [item.text() for item in doc('.tags span').items()]
+            price = doc('.info .price span').text()
+            if price and re.search(r'\d+(\.\d*)?', price):
+                item['price'] = float(re.search(r'\d+(\.\d*)?', price).group())
+            item['authors'] = re.search(r'作者：(.*)', doc('.info .authors').text()).group(1) \
+                if doc('.info .authors').text() else None
+            item['published_at'] = re.search(r'(\d{4}-\d{2}-\d{2})', doc('.info .published-at').text()).group(1) \
+                if doc('.info .published-at').text() else None
+            item['isbm'] = re.search(r'ISBN：(.*)', doc('.info .isbn').text()).group(1) \
+                if doc('.info .isbn').text() else None
             item['cover'] = doc('img.cover').attr('src')
-            # item['comments'] = response.css('.comments p::text').re('[^\x00-\xff].*')
+            item['comments'] = [item.text() for item in doc('.comments p').items()]
 
             self.logger.info('item: %s' % item)
 
