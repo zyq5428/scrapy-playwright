@@ -1,4 +1,5 @@
 import scrapy
+import threading
 import sys
 import os
 import re
@@ -42,133 +43,83 @@ class AntiuserSpider(scrapy.Spider):
         self.account = ACCOUNT
         self.username = USERNAME
         self.password = PASSWORD
+        self.user_lock = threading.Lock()
+        self.login_lock = threading.Lock()
+
+    def choose_user(self, cur_user):
+        self.user_lock.acquire()
+
+        if cur_user == self.username:
+            if len(self.account) == 0:
+                sys.exit(1)
+            self.username = self.account[-1][0]
+            self.password = self.account[-1][1]
+            self.account = self.account[0:-1]
+            self.logger.info('Current user: %s, pwd: %s', self.username, self.password)
+
+        self.user_lock.release()
 
     def start_requests(self):
+        self.choose_user(self.username)
+        urls = []
+        for n in range(1, self.settings.get('MAX_PAGE') + 1):
+            index_url = f'{BASE_URL}page/{n}'
+            self.logger.info('Get index url: %s', index_url)
+            urls.append(index_url)
         yield scrapy.Request(
             url = LOGIN_URL,
             callback = self.parse_login,
             meta = {
                 'playwright': True,
-                'playwright_context': 'login',
+                'playwright_context': self.username,
                 'playwright_include_page': True,
                 'playwright_page_init_callback': init_page,
                 'playwright_page_methods': [
                     PageMethod('wait_for_selector', 'input[type="text"]'),
-                ]
+                ],
             },
-            errback = self.errback_close_page,
-        )
-
-    def choose_user(self):
-        if len(self.account) == 0:
-            sys.exit(1)
-        self.username = self.account[-1][0]
-        self.password = self.account[-1][1]
-        self.account = self.account[0:-1]
-        self.logger.info('Current user: %s,pwd: %s', self.username, self.password)
-
-
-    async def login(self, page):
-        # await page.screenshot(path="./image/login.png", full_page=True)
-        self.choose_user()
-        try:
-            self.logger.info('Start logging...')
-            await page.locator('input[type="text"]').fill(self.username)
-            await page.locator('input[type="password"]').fill(self.password)
-            await page.locator("form").get_by_role("button", name="登录").click()
-            await page.wait_for_load_state("networkidle")
-            username = page.get_by_text(self.username)
-            await username.wait_for()
-            self.logger.info('The switching user is: %s', self.username)
-            # In order to obtain the token of JWT
-            await page.goto(BASE_URL)
-            await page.wait_for_load_state("networkidle")
-            # save storage_state to file
-            storage = await page.context.storage_state(path=self.username)
-            self.logger.debug('Cookies is saved to %s: \n %s', self.username, storage)
-            # await page.screenshot(path="./image/login_succeed.png", full_page=True)
-        except Exception as e:
-            self.logger.error('login failed', exc_info=True)
-
-    async def relogin(self, response, url, username):
-        page = response.meta['playwright_page']
-        # repeat_url = response.meta['url']
-        # self.logger.info('repeat url is: %s', repeat_url)
-        if username == self.username:
-            await self.login(page)
-        else:
-            await page.wait_for_timeout(10000)
-        storage_state = {}
-        with open('cookies.json') as f:
-            storage_state = json.load(f)
-        self.logger.info('Recrawl the site: %s', url)
-        yield scrapy.Request(
-            url = url,
-            callback = self.parse_index,
-            meta = {
-                'playwright': True,
-                'playwright_context': 'parse_detail',
-                "playwright_context_kwargs": {
-                    "storage_state": storage_state,
-                },
-                'playwright_include_page': True,
-                'playwright_page_init_callback': init_page,
-                'playwright_page_methods': [
-                    PageMethod("wait_for_selector", ".logo"),
-                ]
+            cb_kwargs = {
+                'username': self.username,
+                'password': self.password,
+                'urls': urls,
+                'callback': self.parse_index,
             },
             dont_filter = True,
             errback = self.errback_close_page,
         )
-        await page.close()
-        self.logger.info('The login page are closed')
 
-    async def parse_login(self, response):
+    async def parse_login(self, response, username, password, urls, callback):
         page = response.meta['playwright_page']
-        await self.login(page)
+        try:
+            self.logger.info('Start logging...')
+            await page.locator('input[type="text"]').fill(username)
+            await page.locator('input[type="password"]').fill(password)
+            await page.locator("form").get_by_role("button", name="登录").click()
+            await page.wait_for_load_state("networkidle")
+            user = page.get_by_text(username)
+            await user.wait_for()
+            self.logger.info('The switching user is: %s', username)
+            # In order to obtain the token of JWT
+            await page.goto(BASE_URL)
+            await page.wait_for_load_state("networkidle")
+            # save storage_state to file
+            storage = await page.context.storage_state(path=username)
+            self.logger.debug('Cookies is saved to %s: \n %s', username, storage)
+            # await page.screenshot(path="./image/login_succeed.png", full_page=True)
+        except Exception as e:
+            self.logger.error('login failed', exc_info=True)
 
         storage_state = {}
-        with open('cookies.json') as f:
+        with open(username) as f:
             storage_state = json.load(f)
-        for n in range(1, self.settings.get('MAX_PAGE') + 1):
-            index_url = f'{BASE_URL}page/{n}'
-            self.logger.info('Get index url: %s', index_url)
-            yield scrapy.Request(
-                url = index_url,
-                callback = self.parse_index,
-                meta = {
-                    'playwright': True,
-                    'playwright_context': 'index',
-                    "playwright_context_kwargs": {
-                        "storage_state": storage_state,
-                    },
-                    'playwright_include_page': True,
-                    'playwright_page_init_callback': init_page,
-                    'playwright_page_methods': [
-                        PageMethod("wait_for_selector", ".el-card__body"),
-                    ]
-                },
-                errback = self.errback_close_page,
-            )
-        await page.close()
-        self.logger.info('The login page are closed')
-
-    async def parse_index(self, response):
-        page = response.meta['playwright_page']
-        storage_state = {}
-        with open('cookies.json') as f:
-            storage_state = json.load(f)
-        books = response.css('#index .el-row .el-col-4')
-        for book in books:
-            href = book.css('.bottom a::attr("href")').extract_first()
-            url = urljoin(BASE_URL, href)
-            self.logger.info('Get detail url: %s', url)
+        for url in urls:
+            self.logger.info('New user crawl url: %s', url)
             yield scrapy.Request(
                 url = url,
-                callback = self.parse_detail,
+                callback = callback,
                 meta = {
                     'playwright': True,
-                    'playwright_context': 'detail',
+                    'playwright_context': username,
                     "playwright_context_kwargs": {
                         "storage_state": storage_state,
                     },
@@ -177,12 +128,44 @@ class AntiuserSpider(scrapy.Spider):
                     'playwright_page_goto_kwargs': {
                         'wait_until': 'networkidle',
                     },
-                    # 'playwright_page_methods': [
-                    #     PageMethod("wait_for_selector", ".el-card__body"),
-                    # ],
                 },
-                # errback = self.errback_close_page,
-                errback = self.errback_error_code,
+                dont_filter = True,
+                errback = self.errback_close_page,
+            )
+
+        await page.close()
+        self.logger.info('The login page are closed')
+
+    async def parse_index(self, response):
+        page = response.meta['playwright_page']
+        html = await page.content()
+        doc = pq(html)
+
+        storage_state = {}
+        with open(self.username) as f:
+            storage_state = json.load(f)
+
+        books = doc('#index .el-row .el-col-4')
+        for book in books.items():
+            href = book('.bottom a').attr('href')
+            url = urljoin(BASE_URL, href)
+            self.logger.info('Get detail url: %s', url)
+            yield scrapy.Request(
+                url = url,
+                callback = self.parse_detail,
+                meta = {
+                    'playwright': True,
+                    'playwright_context': self.username,
+                    "playwright_context_kwargs": {
+                        "storage_state": storage_state,
+                    },
+                    'playwright_include_page': True,
+                    'playwright_page_init_callback': init_page,
+                    'playwright_page_goto_kwargs': {
+                        'wait_until': 'networkidle',
+                    },
+                },
+                errback = self.errback_close_page,
             )
         await page.close()
 
@@ -194,26 +177,58 @@ class AntiuserSpider(scrapy.Spider):
         username = re.search(r'(\b.*\b)', username).group(1)
         self.logger.info('url: %s, h2: %s, username: %s', response.url, h2, username)
         if h2 == ERROR_STR:
-            self.logger.error('Users click frequently, Current user is: %s', self.username)
-            yield scrapy.Request(
-                url = response.url,
-                callback = self.relogin,
-                meta = {
-                    'playwright': True,
-                    'playwright_context': 'relogin',
-                    'playwright_include_page': True,
-                    'playwright_page_init_callback': init_page,
-                    'playwright_page_methods': [
-                        PageMethod('wait_for_selector', 'input[type="text"]'),
-                    ],
-                },
-                cb_kwargs = {
-                    'url': response.url,
-                    'username': username,
-                },
-                dont_filter = True,
-                errback = self.errback_close_page,
-            )
+            self.logger.error('Users click frequently, Current user is: %s', username)
+            if username == self.username:
+                self.choose_user(username)
+            self.login_lock.acquire()
+            if os.path.exists(self.username):
+                self.logger.info('use user: %s to crawl url: %s', self.username, response.url)
+                storage_state = {}
+                with open(self.username) as f:
+                    storage_state = json.load(f)
+                yield scrapy.Request(
+                    url = response.url,
+                    callback = self.parse_detail,
+                    meta = {
+                        'playwright': True,
+                        'playwright_context': self.username,
+                        "playwright_context_kwargs": {
+                            "storage_state": storage_state,
+                        },
+                        'playwright_include_page': True,
+                        'playwright_page_init_callback': init_page,
+                        'playwright_page_goto_kwargs': {
+                            'wait_until': 'networkidle',
+                        },
+                    },
+                    dont_filter = True,
+                    errback = self.errback_close_page,
+                )
+            else:
+                self.logger.info('Nend login new user: %s', self.username)
+                urls = [response.url]
+                yield scrapy.Request(
+                    url = LOGIN_URL,
+                    callback = self.parse_login,
+                    meta = {
+                        'playwright': True,
+                        'playwright_context': self.username,
+                        'playwright_include_page': True,
+                        'playwright_page_init_callback': init_page,
+                        'playwright_page_goto_kwargs': {
+                            'wait_until': 'networkidle',
+                        },
+                    },
+                    cb_kwargs = {
+                        'username': self.username,
+                        'password': self.password,
+                        'urls': urls,
+                        'callback': self.parse_detail,
+                    },
+                    dont_filter = True,
+                    errback = self.errback_close_page,
+                )
+            self.login_lock.release()
         else:
             item = AntiUserItem()
             html = await page.content()
@@ -234,16 +249,11 @@ class AntiuserSpider(scrapy.Spider):
             item['cover'] = doc('img.cover').attr('src')
             item['comments'] = [item.text() for item in doc('.comments p').items()]
 
-            self.logger.info('item: %s' % item)
+            self.logger.debug('item: %s' % item)
 
             yield item
         await page.close()
 
     async def errback_close_page(self, failure):
-        page = failure.request.meta['playwright_page']
-        await page.close()
-
-    async def errback_error_code(self, failure):
-        self.logger.error(repr(failure))
         page = failure.request.meta['playwright_page']
         await page.close()
